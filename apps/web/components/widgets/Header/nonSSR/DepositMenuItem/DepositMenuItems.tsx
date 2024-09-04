@@ -118,23 +118,25 @@ export default function DepositMenuItem() {
     await l2tx.sign();
     await l2tx.send();
 
-    await logBridged.mutateAsync({
-      userAddress: network.address ?? '',
-      amount: amountIn,
-      isUnbridged: false,
-      envContext: getEnvContext(),
-    });
-
-    if (amountIn >= 50n * 10n ** BigInt(L2_ASSET.decimals))
-      await progress.mutateAsync({
-        userAddress: networkStore.address!,
-        section: 'UI_TESTS_WEB',
-        id: 2,
-        txHash: JSON.stringify(
-          (l2tx.transaction! as PendingTransaction).toJSON()
-        ),
+    try {
+      await logBridged.mutateAsync({
+        userAddress: network.address ?? '',
+        amount: amountIn,
+        isUnbridged: false,
         envContext: getEnvContext(),
       });
+
+      if (amountIn >= 50n * 10n ** BigInt(L2_ASSET.decimals))
+        await progress.mutateAsync({
+          userAddress: networkStore.address!,
+          section: 'UI_TESTS_WEB',
+          id: 2,
+          txHash: JSON.stringify(
+            (l2tx.transaction! as PendingTransaction).toJSON()
+          ),
+          envContext: getEnvContext(),
+        });
+    } catch {}
   };
 
   const unbridge = async (amount: bigint) => {

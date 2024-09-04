@@ -15,6 +15,7 @@ import { useNotificationStore } from '@/components/shared/Notification/lib/notif
 import Rules from './components/Rules';
 import HowToPlay from './components/HowToPlay';
 import BetControl from './components/BetControl';
+import { useMinaBalancesStore } from '@/lib/stores/minaBalances';
 
 const SYMBOLS = ['💲', '₿', '💰'];
 const ICON_HEIGHT = 100;
@@ -27,7 +28,11 @@ interface ReelProps {
   onSpinComplete: () => void;
 }
 
-const Reel: React.FC<ReelProps> = ({ spinning, finalSymbol, onSpinComplete }) => {
+const Reel: React.FC<ReelProps> = ({
+  spinning,
+  finalSymbol,
+  onSpinComplete,
+}) => {
   const reelRef = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
 
@@ -36,7 +41,7 @@ const Reel: React.FC<ReelProps> = ({ spinning, finalSymbol, onSpinComplete }) =>
       const delta = 2 * NUM_ICONS + Math.round(Math.random() * NUM_ICONS);
       const duration = (8 + delta) * TIME_PER_ICON;
 
-      setOffset(prev => prev + delta * ICON_HEIGHT);
+      setOffset((prev) => prev + delta * ICON_HEIGHT);
 
       setTimeout(() => {
         if (reelRef.current) {
@@ -56,19 +61,22 @@ const Reel: React.FC<ReelProps> = ({ spinning, finalSymbol, onSpinComplete }) =>
   }, [spinning]);
 
   return (
-    <div className="reel w-[100px] h-[300px] border border-black/30 rounded-md overflow-hidden relative bg-gray-800">
-      <div 
+    <div className="reel relative h-[300px] w-[100px] overflow-hidden rounded-md border border-black/30 bg-gray-800">
+      <div
         ref={reelRef}
-        className="absolute top-0 left-0 w-full"
+        className="absolute left-0 top-0 w-full"
         style={{ transform: `translateY(${-offset}px)` }}
       >
         {[...SYMBOLS, ...SYMBOLS, ...SYMBOLS].map((symbol, index) => (
-          <div key={index} className="h-[100px] flex items-center justify-center text-6xl">
+          <div
+            key={index}
+            className="flex h-[100px] items-center justify-center text-6xl"
+          >
             {symbol}
           </div>
         ))}
       </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/40 pointer-events-none"></div>
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/40"></div>
     </div>
   );
 };
@@ -84,8 +92,8 @@ export default function Slot_Machine({
   params,
 }: {
   params: { competitionId: string };
-}){
-  const [auroBalance, setAuroBalance] = useState('0');
+}) {
+  const minaBalancesStore = useMinaBalancesStore();
   const [gameBalance, setGameBalance] = useState('0');
   const [bet, setBet] = useState<number>(1);
   const [jackpot, setJackpot] = useState('0');
@@ -105,40 +113,31 @@ export default function Slot_Machine({
   const protokitChain = useProtokitChainStore();
   const notificationStore = useNotificationStore();
 
-  useEffect(() => {
-    const initializeSlotMachine = async () => {
-      if (client) {
-        const clientAppChain = client as ClientAppChain<
-          typeof tokenTwistConfig.runtimeModules,
-          any,
-          any,
-          any
-        >;
-  
-        try {
-          await clientAppChain.start();
-          const resolvedSlotMachine = clientAppChain.runtime.resolve('SlotMachine');
-          setSlotMachine(resolvedSlotMachine);
-        } catch (error) {
-          console.error("Failed to initialize SlotMachine:", error);
-        }
-      }
-    };
-  
-    initializeSlotMachine();
-  }, [client]);
+  const clientAppChain = client as ClientAppChain<
+    typeof tokenTwistConfig.runtimeModules,
+    any,
+    any,
+    any
+  >;
 
-  const fetchAuroBalance = async () => {
-    // Implement fetching Auro wallet balance
-    // This is a placeholder, replace with actual Auro wallet balance fetching
-    setAuroBalance('1000');
-  };
-  
+  const query = networkStore.protokitClientStarted
+    ? clientAppChain.query.runtime.SlotMachine
+    : undefined;
+
+  useEffect(() => {
+    if (!networkStore.protokitClientStarted) return;
+
+    const slotMachine_ = client.runtime.resolve('SlotMachine');
+    setSlotMachine(slotMachine_);
+  }, [networkStore.protokitClientStarted]);
+
   const fetchGameBalance = async () => {
-    if (!slotMachine) return;
+    if (!query || !networkStore.address) return;
     try {
-      const balance = await slotMachine.getBalance();
-      setGameBalance(balance.toString());
+      const balance = await query?.playerBalances.get(
+        PublicKey.fromBase58(networkStore.address!)
+      );
+      if (balance) setGameBalance(balance.toString());
     } catch (error) {
       console.error('Error fetching game balance:', error);
       notificationStore.create({
@@ -151,8 +150,8 @@ export default function Slot_Machine({
   const fetchJackpot = async () => {
     if (!slotMachine) return;
     try {
-      const jackpot = await slotMachine.getJackpot();
-      setJackpot(jackpot.toString());
+      const jackpot = await query?.jackpot.get();
+      if (jackpot) setJackpot(jackpot.toString());
     } catch (error) {
       console.error('Error fetching jackpot:', error);
       notificationStore.create({
@@ -170,14 +169,14 @@ export default function Slot_Machine({
       });
       return;
     }
-    
-    if (BigInt(gameBalance) < BigInt(bet)) {
-      notificationStore.create({
-        type: 'error',
-        message: 'Insufficient balance for this bet.',
-      });
-      return;
-    }
+
+    // if (BigInt(gameBalance) < BigInt(bet)) {
+    //   notificationStore.create({
+    //     type: 'error',
+    //     message: 'Insufficient balance for this bet.',
+    //   });
+    //   return;
+    // }
 
     setSpinning(true);
     setSpinCompleteCount(0);
@@ -190,7 +189,7 @@ export default function Slot_Machine({
           await slotMachine.spin(UInt64.from(BigInt(bet)));
         }
       );
-  
+
       await tx.sign();
       await tx.send();
 
@@ -207,13 +206,15 @@ export default function Slot_Machine({
   };
 
   const handleSpinComplete = () => {
-    setSpinCompleteCount(prev => prev + 1);
+    setSpinCompleteCount((prev) => prev + 1);
   };
 
   const finalizeSpin = async () => {
     if (!slotMachine) return;
     try {
-      const lastSpin = await slotMachine.getLastSpin();
+      const lastSpin = await query?.lastSpins.get(
+        PublicKey.fromBase58(networkStore.address!)
+      );
       const spinResult = lastSpin.toBigInt();
 
       const reel3 = Number(spinResult % 10n);
@@ -242,7 +243,6 @@ export default function Slot_Machine({
   };
 
   useEffect(() => {
-    fetchAuroBalance();
     fetchGameBalance();
     fetchJackpot();
   }, [protokitChain.block, slotMachine]);
@@ -254,11 +254,21 @@ export default function Slot_Machine({
       mobileImage={CoverSVG}
       defaultPage={'Game'}
     >
-      <div className="flex justify-between item-center mb-4">
-        <div className='flex gap-4'>
-          <p className="text-left-accent text-2xl">Auro Balance: $ {auroBalance} </p>
-          <p className="text-left-accent text-2xl">Game Balance: $ {gameBalance} Znakes</p>
-          <p className="text-left-accent text-2xl">Jackpot: $ {jackpot} Znakes</p>
+      <div className="item-center mb-4 flex justify-between">
+        <div className="flex gap-4">
+          <p className="text-2xl text-left-accent">
+            Auro Balance: ${' '}
+            {(
+              Number(minaBalancesStore.balances[networkStore.address!] ?? 0) /
+              10 ** 9
+            ).toFixed(2)}{' '}
+          </p>
+          <p className="text-2xl text-left-accent">
+            Game Balance: $ {gameBalance} Znakes
+          </p>
+          <p className="text-2xl text-left-accent">
+            Jackpot: $ {jackpot} Znakes
+          </p>
         </div>
         <div className="flex gap-2">
           <Rules />
@@ -266,50 +276,54 @@ export default function Slot_Machine({
         </div>
       </div>
 
-      <div className="flex gap-8 mt-0">
+      <div className="mt-0 flex gap-8">
         {/* Left Column */}
         <motion.div
-          className="flex flex-col gap-2 items-center justify-center rounded-lg border border-left-accent p-4 w-2/3 pt-6"
+          className="flex w-2/3 flex-col items-center justify-center gap-2 rounded-lg border border-left-accent p-4 pt-6"
           animate={'windowed'}
         >
-          <div className="flex gap-4 bg-gradient-to-b from-gray-700 to-gray-900 p-4 rounded-lg shadow-inner">
+          <div className="flex gap-4 rounded-lg bg-gradient-to-b from-gray-700 to-gray-900 p-4 shadow-inner">
             {[0, 1, 2].map((index) => (
-              <Reel 
-                key={index} 
-                spinning={spinning} 
-                finalSymbol={reels[index]} 
+              <Reel
+                key={index}
+                spinning={spinning}
+                finalSymbol={reels[index]}
                 onSpinComplete={handleSpinComplete}
               />
             ))}
           </div>
-          
-          <div className='flex gap-6'>
-            <span className='mt-4'><BetControl bet={bet} setBet={setBet} spinning={spinning} /></span> 
+
+          <div className="flex gap-6">
+            <span className="mt-4">
+              <BetControl bet={bet} setBet={setBet} spinning={spinning} />
+            </span>
 
             <Button
               label={spinning ? 'Spinning...' : 'Spin'}
               onClick={handleSpin}
               disabled={spinning}
-              className="mt-4 text-black p-4 text-2xl px-6 rounded-full"
+              className="mt-4 rounded-full p-4 px-6 text-2xl text-black"
             />
           </div>
 
           {gameResult && (
-            <div className={`mt-4 text-2xl ${gameResult.includes('won') ? 'text-green-500' : 'text-red-500'}`}>
+            <div
+              className={`mt-4 text-2xl ${gameResult.includes('won') ? 'text-green-500' : 'text-red-500'}`}
+            >
               {gameResult}
             </div>
           )}
         </motion.div>
 
         {/* Right Column */}
-        <div className="w-1/3 p-4 border border-left-accent rounded-lg">  
-          <h2 className="text-left-accent text-xl">Additional Content</h2>
+        <div className="w-1/3 rounded-lg border border-left-accent p-4">
+          <h2 className="text-xl text-left-accent">Additional Content</h2>
           <p className="text-left-accent">
-            Here you can display additional information or features related to your game or slot machine.
+            Here you can display additional information or features related to
+            your game or slot machine.
           </p>
         </div>
       </div>
     </GamePage>
   );
-};
-
+}
