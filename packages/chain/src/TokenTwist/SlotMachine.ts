@@ -17,18 +17,19 @@ import {
 } from '@proto-kit/protocol';
 import { UInt64 } from '@proto-kit/library';
 import { RandomGenerator } from '../engine';
-import { run } from 'node:test';
+import { Balances } from '@proto-kit/library';
+import { inject } from 'tsyringe';
+import { ZNAKE_TOKEN_ID } from '../constants';
 
 @runtimeModule()
 export class SlotMachine extends RuntimeModule {
   @state() public jackpot = State.from<UInt64>(UInt64);
-  @state() public playerBalances = StateMap.from<PublicKey, UInt64>(PublicKey, UInt64);
   @state() public lastSpins = StateMap.from<PublicKey, Field>(PublicKey, Field);
   @state() public lastSpinHashes = StateMap.from<PublicKey, Field>(PublicKey, Field);
 
   private randomGen: RandomGenerator;
 
-  constructor() {
+  constructor(@inject('Balances') private balances: Balances) {
     super();
     this.randomGen = new RandomGenerator({ seed: Field.random(), source: Field.random(), curValue: Field.random() });
   }
@@ -37,12 +38,12 @@ export class SlotMachine extends RuntimeModule {
   @runtimeMethod()
   public async spin(bet: UInt64): Promise<{ reel1: Field; reel2: Field; reel3: Field }> {
     const sender = this.transaction.sender.value;
-    const playerBalance = (await this.playerBalances.get(sender)).value;
+    const playerBalance = await this.balances.getBalance(ZNAKE_TOKEN_ID, sender);
     
     assert(playerBalance.greaterThanOrEqual(bet), 'Insufficient balance');
 
     // Deduct bet from player balance
-    await this.playerBalances.set(sender, playerBalance.sub(bet));
+    await this.balances.setBalance(ZNAKE_TOKEN_ID, sender, playerBalance.sub(bet))
 
     // Generate random numbers for reels (0, 1, or 2 representing different symbols)
     const reel1 = Field.from(this.randomGen.getNumber(3).toString());
@@ -98,7 +99,7 @@ export class SlotMachine extends RuntimeModule {
       newPlayerBalance
     );
 
-    await this.playerBalances.set(sender, newPlayerBalance);
+    await this.balances.setBalance(ZNAKE_TOKEN_ID, sender, newPlayerBalance)
 
     return { reel1, reel2, reel3 };
   }
@@ -119,22 +120,22 @@ export class SlotMachine extends RuntimeModule {
   @runtimeMethod()
   public async deposit(amount: UInt64): Promise<void> {
     const sender = this.transaction.sender.value;
-    const currentBalance = (await this.playerBalances.get(sender)).value;
-    await this.playerBalances.set(sender, currentBalance.add(amount));
+    const currentBalance = (await this.balances.getBalance(ZNAKE_TOKEN_ID, sender));
+    await this.balances.setBalance(ZNAKE_TOKEN_ID, sender, currentBalance.add(amount))
   }
 
   @runtimeMethod()
   public async withdraw(amount: UInt64): Promise<void> {
     const sender = this.transaction.sender.value;
-    const currentBalance = (await this.playerBalances.get(sender)).value;
+    const currentBalance = (await this.balances.getBalance(ZNAKE_TOKEN_ID, sender));
     assert(currentBalance.greaterThanOrEqual(amount), 'Insufficient balance');
-    await this.playerBalances.set(sender, currentBalance.sub(amount));
+    await this.balances.setBalance(ZNAKE_TOKEN_ID, sender, currentBalance.sub(amount));
   }
 
   @runtimeMethod()
   public async getBalance(): Promise<UInt64> {
     const sender = this.transaction.sender.value;
-    return (await this.playerBalances.get(sender)).value;
+    return (await this.balances.getBalance(ZNAKE_TOKEN_ID, sender));
   }
 
   @runtimeMethod()

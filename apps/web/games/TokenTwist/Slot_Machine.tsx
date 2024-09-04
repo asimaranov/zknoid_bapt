@@ -16,6 +16,7 @@ import Rules from './components/Rules';
 import HowToPlay from './components/HowToPlay';
 import BetControl from './components/BetControl';
 import { useMinaBalancesStore } from '@/lib/stores/minaBalances';
+import { useProtokitBalancesStore } from '@/lib/stores/protokitBalances';
 
 const SYMBOLS = ['💲', '₿', '💰'];
 const ICON_HEIGHT = 100;
@@ -94,6 +95,8 @@ export default function Slot_Machine({
   params: { competitionId: string };
 }) {
   const minaBalancesStore = useMinaBalancesStore();
+  const protokitBalancesStore = useProtokitBalancesStore();
+
   const [gameBalance, setGameBalance] = useState('0');
   const [bet, setBet] = useState<number>(1);
   const [jackpot, setJackpot] = useState('0');
@@ -134,9 +137,8 @@ export default function Slot_Machine({
   const fetchGameBalance = async () => {
     if (!query || !networkStore.address) return;
     try {
-      const balance = await query?.playerBalances.get(
-        PublicKey.fromBase58(networkStore.address!)
-      );
+      const balance =
+        await protokitBalancesStore.balances[networkStore.address!];
       if (balance) setGameBalance(balance.toString());
     } catch (error) {
       console.error('Error fetching game balance:', error);
@@ -170,13 +172,13 @@ export default function Slot_Machine({
       return;
     }
 
-    // if (BigInt(gameBalance) < BigInt(bet)) {
-    //   notificationStore.create({
-    //     type: 'error',
-    //     message: 'Insufficient balance for this bet.',
-    //   });
-    //   return;
-    // }
+    if (BigInt(gameBalance) < BigInt(bet)) {
+      notificationStore.create({
+        type: 'error',
+        message: 'Insufficient balance for this bet.',
+      });
+      return;
+    }
 
     setSpinning(true);
     setSpinCompleteCount(0);
@@ -264,7 +266,7 @@ export default function Slot_Machine({
             ).toFixed(2)}{' '}
           </p>
           <p className="text-2xl text-left-accent">
-            Game Balance: $ {gameBalance} Znakes
+            Game Balance: $ {(Number(gameBalance) / 10 ** 9).toFixed(2)} Znakes
           </p>
           <p className="text-2xl text-left-accent">
             Jackpot: $ {jackpot} Znakes
